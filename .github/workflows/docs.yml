@@ -24,6 +24,7 @@ jobs:
           auto-update-conda: true
       
       - name: Verify environment
+      	shell: bash -l {0}
         run: |
           which python
           python --version
