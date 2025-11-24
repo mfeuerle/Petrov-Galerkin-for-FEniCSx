@@ -20,7 +20,7 @@ jobs:
         with:
           activate-environment: docs
           environment-file: docs/environment.yml
-          python-version: "3.10"
+          python-version: "3.11"
           auto-update-conda: true
 
       - name: Build HTML
