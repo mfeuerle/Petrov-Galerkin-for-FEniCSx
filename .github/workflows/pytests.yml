@@ -13,13 +13,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@v2
         with:
-          activate-environment: tests
+          environment-name: tests
           environment-file: environment.yml
-          python-version: "3.12"
-          auto-update-conda: true
+          cache-environment: true
+          cache-environment-key: "env-${{ hashFiles('environment.yml') }}"
+          create-args: >-
+            python=3.12
 
       - name: Run pytest
         shell: bash -l {0}
