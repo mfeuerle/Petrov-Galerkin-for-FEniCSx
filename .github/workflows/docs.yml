@@ -18,8 +18,14 @@ jobs:
       - name: Merge environment files
         run: |
           cp environment.yml environment-combined.yml
+          echo "Base Conda File:"
+          cat environment-combined.yml
+          echo "Sphinx Conda File:"
+          cat docs/environment-sphinx.yml
           # extract dependencies from docs/environment-sphinx.yml
           awk '/dependencies:/ {flag=1; next} /^([^[:space:]]|$)/ {flag=0} flag {print}' docs/environment-sphinx.yml >> environment-combined.yml
+          echo "Combined Conda File:"
+          cat environment-combined.yml
 
       - name: Set up micromamba
         uses: mamba-org/setup-micromamba@v2
