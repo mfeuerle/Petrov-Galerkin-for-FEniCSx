@@ -66,7 +66,7 @@ class DirichletBC:
         if self._free_dofs is None:
             free_dofs = np.ones(self.ndofs, dtype=bool)
             free_dofs[self.fixed_dofs] = False
-            self._free_dofs = np.where(free_dofs)[0]
+            self._free_dofs = np.sort(np.where(free_dofs)[0])
         return self._free_dofs
 
       
