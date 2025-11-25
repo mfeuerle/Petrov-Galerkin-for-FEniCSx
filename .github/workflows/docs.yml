@@ -22,10 +22,6 @@ jobs:
           environment-file: environment.yml
           python-version: "3.12"
           auto-update-conda: true
-      
-      - name: Update environment with sphinx dependencies
-        shell: bash -l {0}
-        run: conda env update -n docs -f docs/environment-sphinx.yml
 
       - name: Build HTML
         working-directory: docs
