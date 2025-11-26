@@ -34,12 +34,12 @@ release = '0.1'
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
-    'sphinx.ext.napoleon',
     'sphinx.ext.mathjax',
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.inheritance_diagram',
     'sphinx.ext.viewcode',
+    'sphinx.ext.napoleon',
 ]
 
 show_authors = False # show code and section authors
@@ -82,7 +82,7 @@ autodoc_default_options = {
 }
 
 
-autodoc_typehints_format = 'fully-qualified'
+autodoc_typehints_format = 'short'
 autodoc_typehints = 'description'
 
 # -----------------------------------------------------------------------------
