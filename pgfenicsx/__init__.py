@@ -12,8 +12,11 @@ Functions
 .. autosummary::
    :toctree: _generated/ 
    
+   setup_boundary_meshtags
+   concatenate_meshtags
    dirichletbc
    collect_dirichletbcs
+   assemble_system
 
 
 .. sectionauthor:: Moritz Feuerle, 2022
