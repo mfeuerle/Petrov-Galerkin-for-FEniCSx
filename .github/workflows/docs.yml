@@ -37,6 +37,10 @@ jobs:
           create-args: >-
             python=3.12
 
+      - name: Install pgfenicsx
+        shell: bash -l {0}
+        run: pip install .
+
       - name: Build HTML
         working-directory: docs
         shell: bash -l {0}

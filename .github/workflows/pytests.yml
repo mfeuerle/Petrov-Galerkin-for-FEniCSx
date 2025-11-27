@@ -23,6 +23,10 @@ jobs:
           create-args: >-
             python=3.12
 
+      - name: Install pgfenicsx
+        shell: bash -l {0}
+        run: pip install .
+
       - name: Run pytest
         shell: bash -l {0}
         run: pytest -v

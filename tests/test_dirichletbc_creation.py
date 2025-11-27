@@ -6,9 +6,6 @@ from dolfinx.mesh import create_unit_square, locate_entities_boundary, exterior_
 from dolfinx.fem import functionspace, Constant, Function, locate_dofs_topological
 from dolfinx import default_scalar_type
 
-import pathlib
-import sys
-sys.path.append(str(pathlib.Path(__file__).parents[1]))
 from pgfenicsx import DirichletBC, dirichletbc
 
 
