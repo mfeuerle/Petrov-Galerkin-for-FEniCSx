@@ -13,7 +13,7 @@ $ pip install .
 for an editable installation
 
 ```bash
-$ pip install .
+$ pip install -e .
 ```
 
 To build the docs also run
