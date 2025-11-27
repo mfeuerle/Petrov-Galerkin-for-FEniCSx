@@ -209,4 +209,5 @@ __marimo__/
 
 .vscode/
 
-
+# vtx plot files
+**/*.bp
