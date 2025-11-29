@@ -94,4 +94,5 @@ intersphinx_mapping = {
     'scipy': ('http://docs.scipy.org/doc/scipy/reference', None),
     'dolfinx': ('https://docs.fenicsproject.org/dolfinx/main/python/', None),
     'ufl': ('https://docs.fenicsproject.org/ufl/main', None),
+    'petsc4py': ('https://petsc.org/release/petsc4py/', None),
 }

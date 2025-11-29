@@ -10,6 +10,8 @@ from dolfinx import default_scalar_type
 from dolfinx.fem.function import FunctionSpace
 from dolfinx import mesh, fem
 import ufl
+import dolfinx.fem.petsc
+from petsc4py import PETSc
 
 from typing import TypeAlias
 from collections.abc import Iterable, Callable
@@ -128,7 +130,7 @@ class DirichletBC:
         if self._free_dofs is None:
             free_dofs = np.ones(self.ndofs, dtype=bool)
             free_dofs[self.fixed_dofs] = False
-            self._free_dofs = np.sort(np.where(free_dofs)[0])
+            self._free_dofs = as_numpy_vector(np.sort(np.where(free_dofs)[0]), np.int32)
         return self._free_dofs
 
       
@@ -213,38 +215,56 @@ def collect_dirichletbcs(bcs: Iterable[DirichletBC], function_space: FunctionSpa
     return DirichletBC(function_space, all_values, all_dofs)
 
 
-def assemble_system(F: ufl.form.Form | tuple[ufl.form.Form, ufl.form.Form], bcs: Iterable[DirichletBC], include_bc: bool = True) -> tuple[sparse.csr_array, np.ndarray] | tuple[sparse.csr_array, np.ndarray, DirichletBC]:
+def assemble_system(F: ufl.form.Form | tuple[ufl.form.Form, ufl.form.Form], bcs: Iterable[DirichletBC], petsc: bool = False) -> tuple[sparse.csr_array, np.ndarray] | tuple[PETSc.Mat, PETSc.Vec]:
     r"""
-    Assemble the system matrix and right-hand side of a Petrov-Galerkin variational problem, applying the Dirichlet boundary conditions given in ``bcs``.
+    Assemble the system matrix and right-hand side of a Petrov-Galerkin variational problem either as SciPy sparse matrix or using PETSc, with the Dirichlet boundary conditions given in ``bcs``.
     
     Args:
         F:
-            The variational form, either one form that can be split using ``A,l = ufl.system(F)`` or the tuple ``(A, l)`` of a bilinear form ``A`` and a linear form ``l``.
+            The variational form, either one form that can be split using ``A,l = ufl.system(F)`` or a tuple ``(A,l)`` of a bilinear form ``A`` and a linear form ``l``.
         bcs:
             Iterable of Dirichlet boundary conditions to be applied, can contain different Dirichlet boundary conditions for the trial and test space.
-        include_bc:
-            If ``True``, the returned system includes the Dirichlet boundary conditions, if ``False``, the system is reduced to the free dofs only and the Dirichlet boundary conditions have to be applied manually.
-    Returns:
-        If ``include_bc`` is ``True``, the assembled system matrix ``A`` and right-hand side ``l``, if ``include_bc`` is ``False`` a single :class:`DirichletBC` object containing all Dirichlet boundary conditions for the trial space is returned additionally.
+        petsc:
+            If True, assemble the system using PETSc matrices and vectors, otherwise using scipy and numpy.
+    Returns: (A,l)
+        The assembled system matrix ``A`` and right-hand side ``l``.
         
     Example:
         >>> from dolfinx import fem, mesh
-        >>> from scipy.sparse.linalg import spsolve
+        >>> import pgfenicsx
         >>> # ... mesh creation ...
         >>> U = fem.functionspace(...)
         >>> V = fem.functionspace(...)
         >>> # ... boundary facets location ...
-        >>> bcs = [dirichletbc(U, uD, facets_U), 
-                   dirichletbc(V, vD, facets_V)]
+        >>> bcs = [pgfenicsx.dirichletbc(U, uD, facets_U), 
+                   pgfenicsx.dirichletbc(V, vD, facets_V)]
         >>> # ... define variational forms A and l ...
+        >>> # solving the system:
+        >>> # (using QR as direct solver for PG formulations
+        >>> # as there might occure non-quadratic matrices)
         
-        >>> A,l = assemble_system((A, l), bcs, include_bc=True)
-        >>> u1 = spsolve(A, l)
+        >>> # Using scipy:
+        >>> from scipy.sparse.linalg import lsqr
+        >>> A_,l_ = pgfenicsx.assemble_system((A,l), bcs, petsc=False)
+        >>> u = fem.Function(U)
+        >>> u.x.array[:] = lsqr(A_,l_)[0] 
         
-        >>> A,l,trial_bc = assemble_system((A, l), bcs, include_bc=False)
-        >>> u2 = np.empty((trial_bc.ndofs,))
-        >>> u2[trial_bc.free_dofs]  = spsolve(A, l)
-        >>> u2[trial_bc.fixed_dofs] = trial_bc.values
+        >>> # Using PETSc:
+        >>> from petsc4py import PETSc
+        >>> A_,l_ = pgfenicsx.assemble_system((A,l), bcs, petsc=True)
+        >>> solver = PETSc.KSP().create(MPI.COMM_WORLD)
+        >>> solver.setOperators(A_)
+        >>> solver.setType("preonly")
+        >>> solver.getPC().setType("qr")
+        >>> solver.setFromOptions()
+        >>> u = fem.Function(U)
+        >>> u.x.petsc_vec.ghostUpdate(
+                addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE
+        >>> )
+        >>> solver.solve(l_, u.x.petsc_vec)
+        
+    .. note::
+        If you call ``assemble_system`` for the same list of Dirichlet boundary conditions ``bcs`` multiple times, you might run ``bcs = pgfenicsx.collect_dirichletbcs(bcs)`` beforehand to avoid collecting them in every call of ``assemble_system``. This has no impact on functionality, but might improve performance.
     """
     if isinstance(F, tuple):
         A,l = F
@@ -258,16 +278,84 @@ def assemble_system(F: ufl.form.Form | tuple[ufl.form.Form, ufl.form.Form], bcs:
     
     [trial_bc,test_bc] = collect_dirichletbcs(bcs, [trial_space, test_space])
     
+    if petsc:
+        return _assemble_system_PETSc(A, l, trial_bc, test_bc)
+    else:
+        return _assemble_system_scipy(A,l,trial_bc,test_bc)
+    
+# def assemble
+
+
+def _assemble_system_scipy(A: ufl.form.Form, l: ufl.form.Form, trial_bc: DirichletBC, test_bc: DirichletBC) -> tuple[sparse.csr_array, np.ndarray]:
     A = fem.assemble_matrix(fem.form(A)).to_scipy()
     l = fem.assemble_vector(fem.form(l)).array
     
-    if include_bc:
-        A_dirichlet = sparse.coo_array((np.ones(len(trial_bc.fixed_dofs)), (np.arange(len(trial_bc.fixed_dofs)), trial_bc.fixed_dofs)), shape=(len(trial_bc.fixed_dofs), A.shape[1])).tocsr()
-        A = sparse.vstack([A_dirichlet, A[test_bc.free_dofs,:]])
-        l = np.concatenate((trial_bc.values, l[test_bc.free_dofs]))
-        return A,l
-    else:
-        A = A[test_bc.free_dofs,:].tocsc()
-        l = l[test_bc.free_dofs] - A[:, trial_bc.fixed_dofs] @ trial_bc.values
-        A = A[:, trial_bc.free_dofs]
-        return A,l,trial_bc
+    n_diri = len(trial_bc.fixed_dofs)
+    
+    A_dirichlet = sparse.coo_array((np.ones(n_diri), (np.arange(n_diri), trial_bc.fixed_dofs)), shape=(n_diri, A.shape[1])).tocsr()
+    A = sparse.vstack([A_dirichlet, A[test_bc.free_dofs,:]])
+    l = np.concatenate((trial_bc.values, l[test_bc.free_dofs]))
+    return A,l
+    # A = A[test_bc.free_dofs,:].tocsc()
+    # l = l[test_bc.free_dofs] - A[:, trial_bc.fixed_dofs] @ trial_bc.values
+    # A = A[:, trial_bc.free_dofs]
+    # return A,l,trial_bc
+    
+    
+def _assemble_system_PETSc(A: ufl.form.Form, l: ufl.form.Form, trial_bc: DirichletBC, test_bc: DirichletBC) -> tuple[PETSc.Mat, PETSc.Vec]:  
+    n = trial_bc.ndofs
+    
+    n_diri = len(trial_bc.fixed_dofs)   # number of rows added to set the trial dirichlet values
+    n_free = len(test_bc.free_dofs)     # number of rows remaining afte removing the test dirichlet rows 
+    
+    A = dolfinx.fem.petsc.assemble_matrix(fem.form(A))
+    l = dolfinx.fem.petsc.assemble_vector(fem.form(l))
+    
+    A.assemble()
+    l.assemble()
+    
+    A_format = A.getType()
+    A_comm = A.comm
+    
+    # ToDo: if len(trial_bc.fixed_dofs) == 0 and len(test_bc.fixed_dofs) == 0: just return A,l
+    # ToDo: if len(trial_bc.fixed_dofs) == 0: just remove test dirichlet rows
+    # ToDO: if len(test_bc.fixed_dofs) == 0: just set trial dirichlet rows
+    # ToDo: if len(trial_bc.fixed_dofs) == len(test_bc.fixed_dofs): dont create a new matrix, modify A in place
+
+    # Extract part not deleted by test dirichlet BC
+    is_rows = PETSc.IS().createGeneral(test_bc.free_dofs, comm=A_comm)
+    is_col = PETSc.IS().createGeneral(np.arange(n, dtype=np.int32), comm=A_comm)
+    A_free = A.createSubMatrix(is_rows, is_col)
+    A.destroy()
+    
+    # Create new matrix to enforce trial dirichlet BC
+    A_dirichlet = PETSc.Mat().createAIJ(size=(n_diri, n), nnz=1, comm=A_comm)
+    A_dirichlet.setUp()
+    for i, j in enumerate(trial_bc.fixed_dofs):
+        A_dirichlet[i, j] = 1.0
+    
+    # merge both matrices
+    A_ = PETSc.Mat().createNest([[A_dirichlet],[A_free]],comm=A_comm)
+    A_dirichlet.destroy()
+    A_free.destroy()
+    
+    # setup right hand side
+    l_ = PETSc.Vec().create(comm=l.comm)
+    l_.setType(l.getType())
+    l_.setSizes(n_diri+n_free)
+    l_.setUp()
+    
+    # Extract part not deleted by test dirichlet BC
+    l_dirichlet = l.getSubVector(is_rows)        
+    l_.setValues(range(n_diri, n_diri + n_free), l_dirichlet.getArray())
+    l.restoreSubVector(is_rows, l_dirichlet)
+    l_dirichlet.destroy()
+    l.destroy()
+    
+    # Set part to to enforce trial dirichlet BC
+    l_.setValues(range(n_diri), trial_bc.values)
+
+    A_.assemble()
+    A_.convert(A_format)
+    l_.assemble()
+    return A_,l_
