@@ -1,10 +1,12 @@
 import numpy as np
 import pytest
 
+from numbers import Number
 from mpi4py import MPI
 from dolfinx.mesh import create_unit_square, locate_entities_boundary, exterior_facet_indices
 from dolfinx.fem import functionspace, Constant, Function, locate_dofs_topological
 from dolfinx import default_scalar_type
+import dolfinx.fem as fem
 
 from pgfenicsx import DirichletBC, dirichletbc
 
@@ -23,6 +25,16 @@ def _test_bc(bc, values, fixed_dofs, free_dofs, space):
     assert np.array_equal(bc.fixed_dofs, fixed_dofs)
     assert np.array_equal(bc.free_dofs, free_dofs)
     assert bc.function_space == space
+    _test_to_dolfinx(bc, values, fixed_dofs)
+    
+def _test_to_dolfinx(bc, values, fixed_dofs):
+    bc_to_dolfinx = bc.to_dolfinx()
+    assert isinstance(bc_to_dolfinx, fem.DirichletBC)
+    assert np.allclose(bc_to_dolfinx.g.x.array[fixed_dofs], values[fixed_dofs])
+    assert np.array_equal(bc_to_dolfinx.dof_indices()[0], fixed_dofs)
+    
+def _test_from_dolfinx(bc_dolfinx, values, fixed_dofs, free_dofs, space):
+    _test_bc(DirichletBC(space, bc_dolfinx), values, fixed_dofs, free_dofs, space)
     
 
 class _Test_DirichletBC_interface:
@@ -48,7 +60,6 @@ class _Test_DirichletBC_interface:
         else:
             bc = DirichletBC(U, self.u, self.fixed_dofs)
             _test_bc(bc, self.values, self.fixed_dofs, self.free_dofs, U)
-
     
 class Test_DirichletBC_Number(_Test_DirichletBC_interface):
     u = 2
@@ -102,7 +113,6 @@ class Test_DirichletBC_wrong_space(_Test_DirichletBC_interface):
     expected_error = ValueError
     
 
-
 free_dofs = np.ones(U.dofmap.index_map.size_global, dtype=bool)
 free_dofs[fixed_dofs] = False
 free_dofs = np.sort(np.where(free_dofs)[0])
@@ -122,18 +132,41 @@ def test_dirichletbc_no_facets():
     values = np.linspace(0, 1, U.dofmap.index_map.size_global)
     bc = dirichletbc(U, values)
     _test_bc(bc, values, fixed_dofs_all, free_dofs_all, U)
+    
+    
+values_dolfinx = np.ones(U.dofmap.index_map.size_global)
+class _Test_from_dolfinx:
+    u = None  # to be defined in subclasses
+    
+    def test(self):
+        if hasattr(self.u, 'function_space'):
+            bc_dolfinx = fem.dirichletbc(self.u, fixed_dofs)
+        else:
+            bc_dolfinx = fem.dirichletbc(self.u, fixed_dofs, U)
+        _test_from_dolfinx(bc_dolfinx, np.ones(U.dofmap.index_map.size_global), fixed_dofs, free_dofs, U)
+        
+class Test_from_dolfinx_Function(_Test_from_dolfinx):
+    u = Function(U)
+    u.interpolate(lambda x: 0*x[0]+1.0)
+    
+class Test_from_dolfinx_Constant(_Test_from_dolfinx):
+    u = Constant(mesh, 1.0)
+
  
 
-# if __name__ == "__main__":
-#     Test_DirichletBC_Function().test()
-#     Test_DirichletBC_Constant().test()
-#     Test_DirichletBC_Number().test()
-#     Test_DirichletBC_Callable().test()
-#     Test_DirichletBC_Array_short().test()
-#     Test_DirichletBC_Array_full().test()
-#     Test_DirichletBC_Array_wrong_length().test()
-#     Test_DirichletBC_wrong_space().test()
-#     Test_DirichletBC_duplicate_dofs().test()
+if __name__ == "__main__":
+    Test_DirichletBC_Function().test()
+    Test_DirichletBC_Constant().test()
+    Test_DirichletBC_Number().test()
+    Test_DirichletBC_Callable().test()
+    Test_DirichletBC_Array_short().test()
+    Test_DirichletBC_Array_full().test()
+    Test_DirichletBC_Array_wrong_length().test()
+    Test_DirichletBC_wrong_space().test()
+    Test_DirichletBC_duplicate_dofs().test()
     
-#     test_dirichletbc_facets_given()
-#     test_dirichletbc_no_facets()
+    Test_from_dolfinx_Function().test()
+    Test_from_dolfinx_Constant().test() 
+    
+    test_dirichletbc_facets_given()
+    test_dirichletbc_no_facets()

@@ -67,25 +67,49 @@ def concatenate_meshtags(mesh: mesh.Mesh, meshtags: Iterable[mesh.MeshTags]) -> 
     return mesh.meshtags(mesh, mesh.topology.dim-1, indices[idx],  values[idx])
 
 class DirichletBC:
-    r"""Class representing a Dirichlet boundary condition."""
+    r"""Class representing a Dirichlet boundary condition as a replacement of :class:`dolfinx.fem.DirichletBC`."""
     
-    def __init__(self, function_space: FunctionSpace, u: BoundaryFunctionType | np.ndarray[float], dofs: np.ndarray[int]):
+    # @classmethod
+    # def from_dolfinx(cls, bc: fem.DirichletBC):
+    #     r"""Create a :class:`DirichletBC` from a :class:`dolfinx.fem.DirichletBC`.
+        
+    #     Args:
+    #         bc:
+    #             The :class:`dolfinx.fem.DirichletBC` to convert.
+    #     """
+    #     u = fem.Function(bc.function_space)
+    #     u.x.array[:] = default_scalar_type(0)
+    #     u.x.array[bc.dof_indices()] = bc.g.x.array[bc.dof_indices()]
+    #     return cls(bc.function_space, u, bc.dof_indices())
+    
+    def __init__(self, function_space: FunctionSpace, u: BoundaryFunctionType | np.ndarray[float] | fem.DirichletBC, dofs: np.ndarray[int] = None):
         r"""Create a Dirichlet boundary condition restricting the ``dofs`` of ``function_space`` with the the values given by ``u``.
         
         Args:
             function_space:
                 The function space the boundary condition is defined on.
             u:
-                Object defining the dirichlet values at the given dofs. Can be given either the same way as in :func:`dirichletbc`, or as a discrete array directly specifying the values at each dof, i.e. an array of a) same length as ``dofs``, i.e. ``u[i]`` containes the dirichlet value of dof ``dofs[i]``, or b) the length of all dofs of the function space, i.e. ``u[dofs[i]]`` containes the dirichlet value of dof ``dofs[i]``.
+                Object defining the dirichlet values at the given dofs. Can be given either the same way as in :func:`dirichletbc`, or as a discrete array directly specifying the values at each dof, i.e. an array of a) same length as ``dofs``, i.e. ``u[i]`` containes the dirichlet value of dof ``dofs[i]``, or b) the length of all dofs of the function space, i.e. ``u[dofs[i]]`` containes the dirichlet value of dof ``dofs[i]``. Additionally, for type conversion, ``u`` can also be a :class:`dolfinx.fem.DirichletBC`, in which case the corresponding dofs and values are extracted from it. (Because :class:`dolfinx.fem.DirichletBC` only stores the Cpp object of its function space, the function space must be provided again in this case.)
             dofs:
-                The dofs of the function space on which the Dirichlet condition is imposed.
+                The dofs of the function space on which the Dirichlet condition is imposed. This argument is mandatory unless ``u`` is a :class:`dolfinx.fem.DirichletBC`.
+                
+        .. note:: 
+            This class does not really contain new functionality / information compared to :class:`dolfinx.fem.DirichletBC` and was introduced for making this addon more convenient to code.
         """
         
-        if isinstance(u, fem.Function):
-            if not u.function_space == function_space:
+        if isinstance(u, fem.DirichletBC):
+            if dofs is not None:
+                raise ValueError('dofs must not be provided if u is a dolfinx.fem.DirichletBC')
+            if not u.function_space == function_space._cpp_object:
+                raise ValueError('Function space must be the same as in the provided dolfinx.fem.DirichletBC')
+            dofs = u.dof_indices()[0]
+            u = u.g
+        
+        if isinstance(u, fem.Function) or (type(u).__name__.startswith('Function_') and type(u).__module__.startswith('dolfinx')):
+            if not (u.function_space == function_space or u.function_space == function_space._cpp_object):
                 raise ValueError('Function u must be defined on the same function space as the DirichletBC')
             values = u.x.array[dofs]
-        elif isinstance(u, fem.Constant):
+        elif isinstance(u, fem.Constant) or (type(u).__name__.startswith('Constant_') and type(u).__module__.startswith('dolfinx')):
             values = np.full(dofs.shape, u.value, dtype=default_scalar_type)
         elif isinstance(u, Number):
             values = np.full(dofs.shape, default_scalar_type(u))
@@ -132,6 +156,13 @@ class DirichletBC:
             free_dofs[self.fixed_dofs] = False
             self._free_dofs = as_numpy_vector(np.sort(np.where(free_dofs)[0]), np.int32)
         return self._free_dofs
+    
+    def to_dolfinx(self) -> fem.DirichletBC:
+        """Convert this Dirichlet boundary condition to a :class:`dolfinx.fem.DirichletBC`."""
+        u = fem.Function(self.function_space)
+        u.x.array[:] = default_scalar_type(0)
+        u.x.array[self.fixed_dofs] = self.values
+        return fem.dirichletbc(u, self.fixed_dofs)
 
       
 def dirichletbc(function_space: FunctionSpace, u: BoundaryFunctionType, facets: np.ndarray[int] | None = None) -> DirichletBC:
@@ -160,12 +191,12 @@ def dirichletbc(function_space: FunctionSpace, u: BoundaryFunctionType, facets: 
 
 
 
-def collect_dirichletbcs(bcs: Iterable[DirichletBC], function_space: FunctionSpace | Iterable[FunctionSpace] | None = None, check_tol: float = 1e-14) -> DirichletBC | list[DirichletBC]:
+def collect_dirichletbcs(bcs: Iterable[DirichletBC | fem.DirichletBC], function_space: FunctionSpace | Iterable[FunctionSpace] | None = None, check_tol: float = 1e-14) -> DirichletBC | list[DirichletBC]:
     r"""Collect multiple Dirichlet boundary conditions given in ``bcs`` into a single Dirichlet boundary condition for each space given in ``function_space``.
     
     Args:
         bcs:
-            Iterable of Dirichlet boundary conditions (possibly defined on different function spaces) to be collected into one Dirichlet boundary condition per function space.
+            Iterable of Dirichlet boundary conditions (possibly defined on different function spaces) to be collected into one Dirichlet boundary condition per function space. If bcs contains any :class:`dolfinx.fem.DirichletBC`, the `function_space` argument is mandatory.
             
         function_space:
             The function space(s) for which the Dirichlet boundary conditions are to be collected. If ``None``, all function spaces occuring in ``bcs`` are used, in the same order as they appear in ``bcs``.
@@ -176,6 +207,18 @@ def collect_dirichletbcs(bcs: Iterable[DirichletBC], function_space: FunctionSpa
     Returns:
         One Dirichlet boundary condition per function space containing all Dirichlet boundary conditions for that space. If ``function_space`` is a single function space, a single Dirichlet boundary condition is returned; if it is an iterable of function spaces or ``None``, a list of Dirichlet boundary conditions is returned in the same order as the function spaces in ``function_space``.
     """
+    
+    # convert dolfinx DirichletBCs to pgfenicsx DirichletBCs
+    bcs_converted = []
+    for bc in bcs:
+        if isinstance(bc, fem.DirichletBC):
+            if function_space is None:
+                raise ValueError('function_space must be provided if bcs contains dolfinx.fem.DirichletBCs')
+            idx = np.where([bc.function_space == space._cpp_object for space in function_space])[0]
+            bcs_converted.append(DirichletBC(function_space[idx[0]], bc))
+        else:
+            bcs_converted.append(bc)
+    bcs = bcs_converted
     
     if function_space is None:
         function_space = list()
@@ -264,7 +307,13 @@ def assemble_system(F: ufl.form.Form | tuple[ufl.form.Form, ufl.form.Form], bcs:
         >>> solver.solve(l_, u.x.petsc_vec)
         
     .. note::
-        If you call ``assemble_system`` for the same list of Dirichlet boundary conditions ``bcs`` multiple times, you might run ``bcs = pgfenicsx.collect_dirichletbcs(bcs)`` beforehand to avoid collecting them in every call of ``assemble_system``. This has no impact on functionality, but might improve performance.
+        If you call ``assemble_system`` for the same list of Dirichlet boundary conditions ``bcs`` multiple times, you might run ``bcs = pgfenicsx.collect_dirichletbcs(bcs, [trial_space, test_space])`` beforehand to avoid collecting them in every call of ``assemble_system``. This has no impact on functionality, but might improve performance.
+        
+    .. todo::
+        Support bcs = None for no dirichlet boundary conditions. Just use 
+        fem.assemble_matrix(fem.form(A)).to_scipy(), fem.assemble_vector(fem.form(l)).array
+        or 
+        dolfinx.fem.petsc.assemble_matrix(fem.form(A)), dolfinx.fem.petsc.assemble_vector(fem.form(l))
     """
     if isinstance(F, tuple):
         A,l = F
@@ -282,8 +331,6 @@ def assemble_system(F: ufl.form.Form | tuple[ufl.form.Form, ufl.form.Form], bcs:
         return _assemble_system_PETSc(A, l, trial_bc, test_bc)
     else:
         return _assemble_system_scipy(A,l,trial_bc,test_bc)
-    
-# def assemble
 
 
 def _assemble_system_scipy(A: ufl.form.Form, l: ufl.form.Form, trial_bc: DirichletBC, test_bc: DirichletBC) -> tuple[sparse.csr_array, np.ndarray]:
