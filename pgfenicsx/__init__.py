@@ -95,7 +95,6 @@ Functions
 
 
 from ._pgfenicsx import *
-from . import utils
 
 # prevent that all that clutter below end up in __all__
 __all__ = [s for s in dir() if not s.startswith('_')]

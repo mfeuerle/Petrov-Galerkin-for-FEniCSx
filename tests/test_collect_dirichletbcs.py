@@ -1,7 +1,4 @@
 import numpy as np
-import pytest
-
-from numbers import Number
 from mpi4py import MPI
 from dolfinx.mesh import create_unit_square, locate_entities_boundary, exterior_facet_indices
 import dolfinx.fem as fem
@@ -153,11 +150,3 @@ def test_two_spaces_only_one_wanted():
     check_bcs(merge_dirichletbcs(bcs,[U,V]), [bc_U_exact, bc_V_exact])
     check_bcs(merge_dirichletbcs(bcs,[V,U]), [bc_V_exact, bc_U_exact])
     check_bcs(merge_dirichletbcs(bcs), [bc_U_exact, bc_V_exact])
-    
-    
-if __name__ == "__main__":
-    test_merge_Function_Function()
-    test_merge_Function_Constant()
-    test_empty_bcs()
-    test_two_spaces_only_one_wanted()
-    
