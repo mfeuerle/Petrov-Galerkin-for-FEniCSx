@@ -16,6 +16,8 @@ for an editable installation
 $ pip install -e .
 ```
 
+or simply copy the contents from `pgfenicsx/_pgfenicsx.py` to your local project.
+
 To build the docs also run
 
 ```bash
