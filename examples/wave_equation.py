@@ -79,15 +79,15 @@ ds = ufl.Measure("ds", domain=msh, subdomain_data=bdry_tagged)
 def get_dofs(space, bdry_part):
     return fem.locate_dofs_topological(space, tdim-1, bdry_tagged.find(bdry_part))
 
-u0_ = fem.Function(U)
-u0_.interpolate(u0)
-g0_ = fem.Function(U)
-g0_.interpolate(g0)
+u0_U = fem.Function(U)
+u0_U.interpolate(u0)
+g0_U = fem.Function(U)
+g0_U.interpolate(g0)
 
-bcs = [ fem.dirichletbc(u0_, get_dofs(U, bdry_prt.t0)      ),
-        fem.dirichletbc(g0_, get_dofs(U, bdry_prt.gamma)   ),
-        fem.dirichletbc(0.0, get_dofs(V, bdry_prt.T),     V),
-        fem.dirichletbc(0.0, get_dofs(V, bdry_prt.gamma), V)]
+bcs = [ fem.dirichletbc(u0_U, get_dofs(U, bdry_prt.t0)      ),
+        fem.dirichletbc(g0_U, get_dofs(U, bdry_prt.gamma)   ),
+        fem.dirichletbc(0.0,  get_dofs(V, bdry_prt.T),     V),
+        fem.dirichletbc(0.0,  get_dofs(V, bdry_prt.gamma), V)]
 
 bcs = pgfenicsx.merge_dirichletbcs(bcs)
 
